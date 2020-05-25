@@ -7,12 +7,14 @@ import pyreadr
 from haversine import haversine, Unit
 from datetime import datetime, timedelta
 
-conmov=2  #condicion de movimiento
 
-Nombre_Dia=[]
-acumulador1=0
-acumulador2=1
-tiempo=5*60 #minutos en segundos
+
+conmov=30  #condicion de movimiento
+
+Nombre_Dia=[] #arreglo que guarda el nombre del dia de la semana de cada fila
+acumulador1=0 #acumulador del tiempo acumulado
+acumulador2=1 #acumulador de las etiquetas de viaje
+tiempo=60*60 #minutos en segundos
 
 #tabla_variables=pd.DataFrame()
 
@@ -46,66 +48,98 @@ for k in range(0,len(glob.glob(directorio_entrada+"*.RData")) ):
        original['dataSource']['file']=archivo
        separador = original['dataSource']['dateTimeLine'].astype(str).str.split(".", n = 1, expand = True) 
        original['dataSource']['Fecha']=separador[0] 
+       separador = original['dataSource']['dateTimeLine'].astype(str).str.split(" ", n = 1, expand = True)  
+       original['dataSource']['Fecha2']=separador[0] 
        original['dataSource']= original['dataSource'].drop( original['dataSource'][((original['dataSource']['latitude']>=-0.19425) | (original['dataSource']['latitude'] <= -0.20341))|(( original['dataSource']['longitude']>=-78.49805 )|(original['dataSource']['longitude'] <= -78.51377))].index)
                
    
     original['dataSource'] = original['dataSource'].reset_index()
     
-    
-    #Colocar Etiqueta de movimiento
-    distancias=[]
-    movimientos=[]
-    
-    for i in range(0,len(original['dataSource'])):       
+#######################################################################################
+###########################################################################################    
+    #Colocar Etiqueta de movimiento (Verificar si esta cerca o no del mismo punto)
+    distancias=[] #arreglo para guardar distancias en metros
+    movimientos=[] #arreglo para guardar distancias validada por la constante conmov
+    for i in range(0,len(original['dataSource'])):      
+                 #en la primera iteracion guardo directamente los datos
                  if(i==0):
-                      distancia=0
-                      distancias.append(distancia)
+                      distancia_haversine=0
+                      distancias.append(distancia_haversine)
                       movimientos.append(0)
                  else:          
                     punto1 = (original['dataSource']['latitude'][i-1], original['dataSource']['longitude'][i-1]) # (lat, lon)
                     punto2 = (original['dataSource']['latitude'][i], original['dataSource']['longitude'][i])
                     
-                    distancia= haversine(punto1, punto2,unit=Unit.METERS)      
-                    distancias.append(distancia)
+                    distancia_haversine= haversine(punto1, punto2,unit=Unit.METERS) #distancia con formula de harservine
+                    distancias.append(distancia_haversine)
                     
-                    if(distancia<=conmov):
-                      movimientos.append(0)
+                    if(distancia_haversine<=conmov):  #condicion para etiquetar si esta en movimiento o no
+                      movimientos.append(0)   # no se movio =0
                     else:
-                      movimientos.append(1)
-                      
-    original['dataSource']["DistMetros"]= distancias
-    original['dataSource']["Movimiento"]= movimientos #se movio=1 no se movio =0
+                      movimientos.append(1)  # se movio=1
+                    
+                    
+    #se anexa los resultados al dataframe                
+    original['dataSource']["DistMetros"]= distancias  
+    original['dataSource']["Movimiento"]= movimientos 
     
-    
+##################################################################################################  
+##################################################################################################  
     #Poner etiquetas de viajes
     acumulador2=1  #Reinicio contador de viajes para cada nuevo archivo
-    etiquetas=[] 
+    etiquetas=[]  #arreglo para guardar la etiqueta de cada viaje
+    acumulador3=0  #acumulador del campo Ruta
+    reco=[]   #Arreglo para guardar el seguimiento de cada punto generado por acumulador 3
     for i in range(0,len(original['dataSource'])):
-                 
+            #en la primera iteracion guardo directamente los datos
             if (i==0):
-                viaje="Viaje "+ str(acumulador2)
-                etiquetas.append(viaje)
+                etiquetas.append(acumulador2)
+                reco.append(acumulador3)
             else:
-                if(original['dataSource']["Movimiento"][i]==0):
-                    fecha1 = datetime.strptime(original['dataSource']["Fecha"][i-1], '%Y-%m-%d %H:%M:%S')
-                    fecha2 = datetime.strptime(original['dataSource']["Fecha"][i], '%Y-%m-%d %H:%M:%S')
-                    Total=(fecha2-fecha1)/timedelta(seconds=1)
-                    acumulador1=acumulador1+Total              
-                    viaje="Viaje "+ str(acumulador2)
-                    etiquetas.append(viaje)
-                    
-                elif(original['dataSource']["Movimiento"][i]==1 and acumulador1 >= tiempo):      
+                #fecha3 y fecha4 son las fecha en formato año-mes-dia para comparar fechas
+                fecha3 = datetime.strptime(original['dataSource']["Fecha2"][i-1], '%Y-%m-%d')
+                fecha4 = datetime.strptime(original['dataSource']["Fecha2"][i], '%Y-%m-%d')  
+                if(fecha3!=fecha4):
+                    #Los contadores se reinician en cada nuevo dia 
                     acumulador1=0
-                   
-                    acumulador2=acumulador2+1
-                    viaje="Viaje "+ str(acumulador2)
-                    etiquetas.append(viaje) 
-                else:
-                    viaje="Viaje "+ str(acumulador2)
-                    etiquetas.append(viaje)  
+                    acumulador2=1
+                    acumulador3=0  
+                    reco.append(acumulador3)
+                    etiquetas.append(acumulador2)      
                     
-    original['dataSource']["Etiqueta"]= etiquetas
-    original['dataSource'].drop(columns =["index"], inplace = True) 
+                #Cuando Movimiento es 0 se acumula el tiempo en el acumulador1
+                elif(original['dataSource']["Movimiento"][i]==0):
+                    #fecha1 y fecha2 son redimensionados en formato año-mes-dia Hora-min-seg
+                    fecha1 = datetime.strptime(original['dataSource']["Fecha"][i-1], '%Y-%m-%d %H:%M:%S')
+                    fecha2 = datetime.strptime(original['dataSource']["Fecha"][i], '%Y-%m-%d %H:%M:%S')                     
+                    #Para luego ser restados entre si y el resultado es transformado en segundos
+                    Total=(fecha2-fecha1)/timedelta(seconds=1)
+                    acumulador1=acumulador1+Total   
+                    reco.append(acumulador3)
+                    etiquetas.append(acumulador2)
+                #Cuando el tiempo acumulador es mayor o igual que la constante tiempo y Movimiento es 1 se 
+                #concluye el viaje y se inicia uno nuevo aumentando en 1 el acumulador2 y reiniciando
+                #Acumulador 1 y 3
+                elif(original['dataSource']["Movimiento"][i]==1 and acumulador1 >= tiempo):      
+                    acumulador1=0                   
+                    acumulador2=acumulador2+1
+                    acumulador3=0  
+                    reco.append(acumulador3)
+                    etiquetas.append(acumulador2) 
+                
+                #Si Movimiento es 1 se mantiene acumulador 2 y se aumenta acumulador 3
+                #Acumulador 1 se mantiene en 0
+                else:
+                    acumulador1=0    
+                    acumulador3=acumulador3+1
+                    reco.append(acumulador3)
+                    etiquetas.append(acumulador2)  
+                    
+    #se anexa los resultados al dataframe                 
+    original['dataSource']["Viaje"]= etiquetas
+    original['dataSource']["Ruta"]= reco
+    
+    original['dataSource'].drop(columns =["index","Fecha2"], inplace = True) 
     tabla_final_uce=  tabla_final_uce.append([ original['dataSource']], ignore_index=True)
     
     
